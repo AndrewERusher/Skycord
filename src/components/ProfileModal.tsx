@@ -49,7 +49,7 @@ export default function ProfileModal({ user, onClose, onSave }: ProfileModalProp
           const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${position.coords.latitude}&lon=${position.coords.longitude}&format=json`);
           const data = await res.json();
           if (data && data.address) {
-            setFormData(prev => ({
+            setFormData((prev: any) => ({
               ...prev,
               country: data.address.country || prev.country,
               state: data.address.state || data.address.region || prev.state,
@@ -156,7 +156,7 @@ export default function ProfileModal({ user, onClose, onSave }: ProfileModalProp
     <div className="modal-overlay animate-fade-in" onClick={onClose}>
       <div className="modal-content animate-slide-up" onClick={e => e.stopPropagation()} style={{ width: '600px', maxWidth: '95vw', maxHeight: '90vh' }}>
         <div className="modal-header">
-          <h2>User Profile {formData.isVerified && <ShieldCheck size={20} color="var(--success)" style={{ marginLeft: '8px', verticalAlign: 'text-bottom' }} title="Verified User" />}</h2>
+          <h2>User Profile {formData.isVerified && <span title="Verified User"><ShieldCheck size={20} color="var(--success)" style={{ marginLeft: '8px', verticalAlign: 'text-bottom' }} /></span>}</h2>
           <button className="icon-btn" onClick={onClose}><X size={24} /></button>
         </div>
         

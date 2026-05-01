@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Phone, Video, MoreHorizontal, Send, Smile, Users, Paperclip, Settings } from 'lucide-react';
+import { Phone, Video, Send, Smile, Users, Paperclip, Settings } from 'lucide-react';
 import GroupAdminModal from './GroupAdminModal';
 import { supabase } from '../lib/supabaseClient';
 
@@ -151,7 +151,7 @@ export default function ChatArea({ activeContact, myId, onStartCall }: ChatAreaP
     // Command interception: /push
     if (newMessage.trim() === '/push' && activeContact.isGroup) {
       // Check if user is admin
-      const { data: memberCheck } = await supabase.from('conversation_members').select('group_role').eq('conversation_id', conversationId).eq('user_id', myId).single();
+      await supabase.from('conversation_members').select('group_role').eq('conversation_id', conversationId).eq('user_id', myId).single();
       
       // Global admin or group admin can push
       // Fetch subgroups

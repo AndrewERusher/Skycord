@@ -11,6 +11,8 @@ interface Contact {
   lastMsg: string;
   avatarUrl?: string;
   role?: string;
+  chatType?: 'subgroup' | 'main' | 'group';
+  parentName?: string;
 }
 
 interface SidebarProps {
