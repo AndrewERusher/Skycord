@@ -31,10 +31,11 @@ interface SidebarProps {
   setCurrentView: (view: 'chat' | 'home' | 'dialpad' | 'contacts' | 'call') => void;
   onNewChat: () => void;
   onNewGroup: () => void;
+  onJoinGroup: (group: Contact) => void;
   onSignOut: () => void;
 }
 
-export default function Sidebar({ onProfileClick, onSettingsClick, currentUser, contacts, activeContactId, onSelectContact, setCurrentView, onNewChat, onNewGroup, onSignOut }: SidebarProps) {
+export default function Sidebar({ onProfileClick, onSettingsClick, currentUser, contacts, activeContactId, onSelectContact, setCurrentView, onNewChat, onNewGroup, onJoinGroup, onSignOut }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showFriendRequest, setShowFriendRequest] = useState(false);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
@@ -98,8 +99,21 @@ export default function Sidebar({ onProfileClick, onSettingsClick, currentUser, 
           setShowFriendRequest(true);
         }
       } else if (searchQuery.toLowerCase().startsWith('g/') && filteredContacts.length > 0) {
-        // If they hit enter on a group search, jump to the top result!
-        onSelectContact(filteredContacts[0].id);
+        const alreadyMember = contacts.some(c => c.id === filteredContacts[0].id);
+        if (alreadyMember) {
+          onSelectContact(filteredContacts[0].id);
+        } else {
+          onJoinGroup(filteredContacts[0]);
+        }
+        setSearchQuery('');
+      } else if (searchQuery.toLowerCase().startsWith('sg/') && filteredContacts.length > 0) {
+        const target = filteredContacts[0];
+        const alreadyMember = contacts.some(c => c.id === target.id);
+        if (alreadyMember) {
+          onSelectContact(target.id);
+        } else {
+          onJoinGroup(target);
+        }
         setSearchQuery('');
       }
     }

@@ -29,6 +29,7 @@ export default function App() {
   const [showNewChat, setShowNewChat] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [activeContactId, setActiveContactId] = useState<string | number>(2);
+  const [joinGroupTarget, setJoinGroupTarget] = useState<any>(null);
   const [theme, setTheme] = useState<'light' | 'dark' | 'rusher'>(() => {
     return (localStorage.getItem('theme') as any) || 'light';
   });
@@ -271,6 +272,7 @@ export default function App() {
           setCurrentView={setCurrentView}
           onNewChat={() => setShowNewChat(true)}
           onNewGroup={() => setShowNewGroup(true)}
+          onJoinGroup={(group) => setJoinGroupTarget(group)}
           onSignOut={async () => {
             await supabase.auth.signOut();
             setIsAuthenticated(false);
@@ -283,7 +285,7 @@ export default function App() {
       {currentView === 'home' && <HomeView />}
       {currentView === 'dialpad' && <DialpadView />}
       {currentView === 'contacts' && <ContactsView contacts={contacts} onStartChat={(id) => { setActiveContactId(id); setCurrentView('chat'); }} />}
-      {currentView === 'call' && <CallView contact={activeContact} type={callType} onEndCall={() => setCurrentView('chat')} />}
+      {currentView === 'call' && <CallView contact={activeContact} type={callType} myId={currentUser.id} onEndCall={() => setCurrentView('chat')} />}
       
       {showNewChat && (
         <NewChatModal 
@@ -316,6 +318,40 @@ export default function App() {
           setTheme={setTheme}
           onClose={() => setShowSettings(false)}
         />
+      )}
+      {joinGroupTarget && (
+        <div className="modal-overlay animate-fade-in" onClick={() => setJoinGroupTarget(null)}>
+          <div className="modal-content animate-slide-up" onClick={e => e.stopPropagation()} style={{ width: '420px' }}>
+            <div className="modal-header">
+              <h2>Join Group</h2>
+              <button className="icon-btn" onClick={() => setJoinGroupTarget(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ marginBottom: '16px', color: 'var(--text-secondary)' }}>
+                Would you like to join <strong>{joinGroupTarget.name}</strong>?
+                {joinGroupTarget.chatType === 'main' && ' This group has subgroups you can explore after joining.'}
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setJoinGroupTarget(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={async () => {
+                if (!session) return;
+                const { error } = await supabase.from('conversation_members').insert({
+                  conversation_id: joinGroupTarget.id,
+                  user_id: session.user.id,
+                  group_role: 'member'
+                });
+                if (error) alert('Could not join group: ' + error.message);
+                else {
+                  fetchContacts(session.user.id);
+                  setActiveContactId(joinGroupTarget.id);
+                  setCurrentView('chat');
+                }
+                setJoinGroupTarget(null);
+              }}>Join Group</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

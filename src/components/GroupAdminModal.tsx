@@ -12,7 +12,10 @@ export default function GroupAdminModal({ groupId, myId, onClose }: GroupAdminMo
   const [members, setMembers] = useState<any[]>([]);
   const [subGroups, setSubGroups] = useState<any[]>([]);
   const [newSubGroupName, setNewSubGroupName] = useState('');
+  const [inviteUsername, setInviteUsername] = useState('');
+  const [inviteStatus, setInviteStatus] = useState<string | null>(null);
   const [amIAdmin, setAmIAdmin] = useState(false);
+  const [isMember, setIsMember] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -29,11 +32,11 @@ export default function GroupAdminModal({ groupId, myId, onClose }: GroupAdminMo
       .eq('conversation_id', groupId);
 
     if (membersData) {
-      setMembers(membersData.filter(m => !m.is_banned)); // don't show banned in active list
-      
+      setMembers(membersData.filter(m => !m.is_banned));
       const me = membersData.find(m => m.user_id === myId);
-      if (me && me.group_role === 'admin') {
-        setAmIAdmin(true);
+      if (me) {
+        setIsMember(true);
+        if (me.group_role === 'admin') setAmIAdmin(true);
       }
     }
 
@@ -78,17 +81,31 @@ export default function GroupAdminModal({ groupId, myId, onClose }: GroupAdminMo
     }).select().single();
     
     if (newGroup) {
-      // Add all current members to the sub group automatically
       const memberInserts = members.map(m => ({
         conversation_id: newGroup.id,
         user_id: m.user_id,
         group_role: m.group_role
       }));
       await supabase.from('conversation_members').insert(memberInserts);
-      
       setNewSubGroupName('');
       fetchData();
     }
+  };
+
+  const handleInvite = async () => {
+    if (!inviteUsername.trim()) return;
+    setInviteStatus('Searching...');
+    const { data: profile } = await supabase.from('profiles').select('id, display_name').eq('username', inviteUsername.trim()).single();
+    if (!profile) { setInviteStatus('User not found.'); return; }
+    const { error } = await supabase.from('conversation_members').insert({ conversation_id: groupId, user_id: profile.id, group_role: 'member' });
+    if (error) { setInviteStatus('Already a member or error: ' + error.message); }
+    else { setInviteStatus(`✅ ${profile.display_name} added!`); setInviteUsername(''); fetchData(); }
+  };
+
+  const handleJoinSubgroup = async (subGroupId: string) => {
+    const { error } = await supabase.from('conversation_members').insert({ conversation_id: subGroupId, user_id: myId, group_role: 'member' });
+    if (error && !error.message.includes('duplicate')) alert('Error joining subgroup: ' + error.message);
+    else fetchData();
   };
 
   return (
@@ -110,11 +127,18 @@ export default function GroupAdminModal({ groupId, myId, onClose }: GroupAdminMo
                 
                 {subGroups.length > 0 ? (
                   <div style={{ display: 'grid', gap: '8px', marginBottom: '16px' }}>
-                    {subGroups.map(sub => (
-                      <div key={sub.id} style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center' }}>
-                        <span style={{ fontWeight: 600 }}># {sub.name}</span>
-                      </div>
-                    ))}
+                    {subGroups.map(sub => {
+                      const alreadyIn = members.find(m => m.user_id === myId);
+                      const inSubgroup = alreadyIn; // already fetched from parent, check sub separately if needed
+                      return (
+                        <div key={sub.id} style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontWeight: 600 }}># {sub.name}</span>
+                          {isMember && (
+                            <button className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '4px 10px' }} onClick={() => handleJoinSubgroup(sub.id)}>Join</button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: '16px' }}>No sub-groups exist.</div>
@@ -135,6 +159,25 @@ export default function GroupAdminModal({ groupId, myId, onClose }: GroupAdminMo
                   </div>
                 )}
               </div>
+
+              {/* Invite Member */}
+              {amIAdmin && (
+                <div style={{ marginBottom: '24px' }}>
+                  <h3 style={{ fontSize: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', marginBottom: '16px' }}>Invite Member</h3>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      className="input-field"
+                      placeholder="Enter username (without u/)..."
+                      value={inviteUsername}
+                      onChange={e => setInviteUsername(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleInvite()}
+                      style={{ flex: 1 }}
+                    />
+                    <button className="btn btn-secondary" onClick={handleInvite}>Invite</button>
+                  </div>
+                  {inviteStatus && <div style={{ marginTop: '8px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{inviteStatus}</div>}
+                </div>
+              )}
 
               {/* Members Section */}
               <div>
