@@ -114,6 +114,7 @@ export default function ChatArea({ activeContact, myId, onStartCall }: ChatAreaP
         setMessages(data.map(m => ({
           id: m.id,
           text: m.text,
+          attachment_url: m.attachment_url,
           author: m.sender_id === myId ? 'You' : activeContact.name,
           time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
           isOutgoing: m.sender_id === myId
@@ -132,6 +133,7 @@ export default function ChatArea({ activeContact, myId, onStartCall }: ChatAreaP
           return [...prev, {
             id: m.id,
             text: m.text,
+            attachment_url: m.attachment_url,
             author: m.sender_id === myId ? 'You' : activeContact.name,
             time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
             isOutgoing: m.sender_id === myId
@@ -202,21 +204,37 @@ export default function ChatArea({ activeContact, myId, onStartCall }: ChatAreaP
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0] && conversationId) {
       const file = e.target.files[0];
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${myId}-${Date.now()}.${fileExt}`;
+      const filePath = `${conversationId}/${fileName}`;
+
       const optimisticMsg = {
         id: Date.now(),
         author: 'You',
-        text: `[Attachment]: ${file.name}`,
+        text: `Uploading attachment: ${file.name}...`,
         timestamp: new Date().toISOString(),
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
         isOutgoing: true
       };
       setMessages(prev => [...prev, optimisticMsg]);
+
+      const { error } = await supabase.storage.from('attachments').upload(filePath, file);
       
+      if (error) {
+        setMessages(prev => prev.map(m => m.id === optimisticMsg.id ? { ...m, text: `[Upload Failed]: ${error.message}` } : m));
+        return;
+      }
+
+      const { data: urlData } = supabase.storage.from('attachments').getPublicUrl(filePath);
+
       await supabase.from('messages').insert({
         conversation_id: conversationId,
         sender_id: myId,
-        text: optimisticMsg.text
+        text: `[Attachment]: ${file.name}`,
+        attachment_url: urlData.publicUrl
       });
+      
+      // We don't update the optimistic message locally because the real-time subscription will push the real message
     }
   };
 
@@ -289,6 +307,15 @@ export default function ChatArea({ activeContact, myId, onStartCall }: ChatAreaP
               
               <div className="message-content">
                 {msg.text}
+                {msg.attachment_url && (
+                  <div style={{ marginTop: '8px' }}>
+                    {msg.attachment_url.match(/\.(jpeg|jpg|gif|png|webp|svg)$/i) ? (
+                      <img src={msg.attachment_url} alt="Attachment" style={{ maxWidth: '100%', maxHeight: '200px', borderRadius: '8px' }} />
+                    ) : (
+                      <a href={msg.attachment_url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-primary)', textDecoration: 'underline' }}>Download Attachment</a>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="message-time">{msg.time}</div>
             </div>

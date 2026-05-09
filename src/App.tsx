@@ -9,6 +9,7 @@ import ContactsView from './components/ContactsView';
 import CallView from './components/CallView';
 import NewChatModal from './components/NewChatModal';
 import AuthView from './components/AuthView';
+import IncomingCallModal from './components/IncomingCallModal';
 import { supabase } from './lib/supabaseClient';
 import type { Session } from '@supabase/supabase-js';
 import './App.css';
@@ -38,6 +39,8 @@ export default function App() {
   const [currentView, setCurrentView] = useState<'chat' | 'home' | 'dialpad' | 'contacts' | 'call'>('chat');
   const [session, setSession] = useState<Session | null>(null);
   const [callType, setCallType] = useState<'video' | 'audio'>('video');
+  const [callRole, setCallRole] = useState<'caller' | 'callee'>('caller');
+  const [incomingCall, setIncomingCall] = useState<{contact: any, type: 'video' | 'audio'} | null>(null);
 
   const fetchProfile = async (userId: string) => {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
@@ -209,6 +212,36 @@ export default function App() {
     idImageUrl: ''
   });
 
+  // WebRTC Signaling Listener for Incoming Calls
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser.id) return;
+
+    const signalChannel = supabase.channel(`user_signals:${currentUser.id}`);
+    
+    signalChannel.on('broadcast', { event: 'incoming_call' }, ({ payload }: any) => {
+      const contact = {
+        id: payload.callerId,
+        name: payload.callerName,
+        status: 'online',
+        isGroup: false,
+        lastMsg: '',
+        avatarUrl: payload.callerAvatar
+      };
+      setIncomingCall({ contact, type: payload.type });
+    });
+
+    // Also listen for call_ended to dismiss the modal if they hang up before we answer
+    signalChannel.on('broadcast', { event: 'call_ended' }, () => {
+      setIncomingCall(null);
+    });
+
+    signalChannel.subscribe();
+
+    return () => {
+      supabase.removeChannel(signalChannel);
+    };
+  }, [isAuthenticated, currentUser.id]);
+
   const activeContact = contacts.length > 0 ? (contacts.find(c => c.id === activeContactId) || contacts[0]) : null;
 
   const handleSaveProfile = async (updatedUser: any) => {
@@ -280,13 +313,66 @@ export default function App() {
         />
       )}
       
-      {currentView === 'chat' && activeContact && <ChatArea activeContact={activeContact} myId={currentUser.id} onStartCall={(type) => { setCallType(type); setCurrentView('call'); }} />}
+      {currentView === 'chat' && activeContact && <ChatArea activeContact={activeContact} myId={currentUser.id} onStartCall={(type) => { 
+        setCallType(type); 
+        setCallRole('caller');
+        setCurrentView('call'); 
+
+        // Send a ring signal to the callee
+        if (!activeContact.isGroup) {
+          const signalChannel = supabase.channel(`temp_signal_${Date.now()}`);
+          signalChannel.subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              signalChannel.send({
+                type: 'broadcast',
+                event: 'incoming_call',
+                payload: {
+                  callerId: currentUser.id,
+                  callerName: currentUser.name,
+                  callerAvatar: currentUser.avatarUrl,
+                  type: type
+                }
+              }).then(() => supabase.removeChannel(signalChannel));
+            }
+          });
+        }
+      }} />}
       {currentView === 'chat' && !activeContact && <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>No contacts available. Find some friends!</div>}
       {currentView === 'home' && <HomeView />}
       {currentView === 'dialpad' && <DialpadView />}
       {currentView === 'contacts' && <ContactsView contacts={contacts} onStartChat={(id) => { setActiveContactId(id); setCurrentView('chat'); }} />}
-      {currentView === 'call' && <CallView contact={activeContact} type={callType} myId={currentUser.id} onEndCall={() => setCurrentView('chat')} />}
+      {currentView === 'call' && <CallView contact={activeContact} type={callType} myId={currentUser.id} callRole={callRole} onEndCall={() => {
+        // Send a call ended signal if we hang up
+        if (activeContact && !activeContact.isGroup) {
+          const signalChannel = supabase.channel(`temp_signal_end_${Date.now()}`);
+          signalChannel.subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              signalChannel.send({
+                type: 'broadcast',
+                event: 'call_ended',
+              }).then(() => supabase.removeChannel(signalChannel));
+            }
+          });
+        }
+        setCurrentView('chat');
+      }} />}
       
+      {incomingCall && (
+        <IncomingCallModal 
+          call={incomingCall} 
+          onAccept={() => {
+            setActiveContactId(incomingCall.contact.id);
+            setCallType(incomingCall.type);
+            setCallRole('callee');
+            setCurrentView('call');
+            setIncomingCall(null);
+          }}
+          onDecline={() => {
+            setIncomingCall(null);
+          }}
+        />
+      )}
+
       {showNewChat && (
         <NewChatModal 
           title="New Chat" 

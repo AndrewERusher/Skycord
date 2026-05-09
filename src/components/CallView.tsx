@@ -7,9 +7,10 @@ interface CallViewProps {
   type: 'video' | 'audio';
   myId: string;
   onEndCall: () => void;
+  callRole: 'caller' | 'callee';
 }
 
-export default function CallView({ contact, type, myId, onEndCall }: CallViewProps) {
+export default function CallView({ contact, type, myId, onEndCall, callRole }: CallViewProps) {
   const [duration, setDuration] = useState(0);
   const [micMuted, setMicMuted] = useState(false);
   const [videoOff, setVideoOff] = useState(type === 'audio');
@@ -95,10 +96,12 @@ export default function CallView({ contact, type, myId, onEndCall }: CallViewPro
         }
       };
 
-      // Caller creates the offer
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      channel.send({ type: 'broadcast', event: 'signal', payload: { type: 'offer', sdp: offer, from: myId } });
+      if (callRole === 'caller') {
+        // Caller creates the offer
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        channel.send({ type: 'broadcast', event: 'signal', payload: { type: 'offer', sdp: offer, from: myId } });
+      }
 
     } catch (err: any) {
       setError(err.message || 'Could not access microphone/camera');
