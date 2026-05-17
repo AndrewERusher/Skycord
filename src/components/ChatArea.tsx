@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Phone, Video, Send, Smile, Users, Paperclip, Settings } from 'lucide-react';
+import { Phone, Video, Send, Smile, Users, Paperclip, Settings, LogOut } from 'lucide-react';
 import GroupAdminModal from './GroupAdminModal';
 import { supabase } from '../lib/supabaseClient';
 
@@ -72,9 +72,11 @@ export default function ChatArea({ activeContact, myId, onStartCall }: ChatAreaP
     if (typeof activeContact.id !== 'string') return;
 
     const initChat = async () => {
-      const { data: myMemberships } = await supabase.from('conversation_members').select('conversation_id').eq('user_id', myId);
-      const { data: theirMemberships } = await supabase.from('conversation_members').select('conversation_id').eq('user_id', activeContact.id);
+      const { data: myMemberships, error: err1 } = await supabase.from('conversation_members').select('conversation_id').eq('user_id', myId);
+      const { data: theirMemberships, error: err2 } = await supabase.from('conversation_members').select('conversation_id').eq('user_id', activeContact.id);
       
+      if (err1) console.error("Error fetching my memberships:", err1);
+      if (err2) console.error("Error fetching their memberships:", err2);
       if (!myMemberships || !theirMemberships) return;
 
       const myConvIds = myMemberships.map(m => m.conversation_id);
@@ -84,18 +86,22 @@ export default function ChatArea({ activeContact, myId, onStartCall }: ChatAreaP
       let currentConvId = null;
 
       if (commonConvIds.length > 0) {
-        const { data: convs } = await supabase.from('conversations').select('id').in('id', commonConvIds).eq('is_group', false);
+        const { data: convs, error: err3 } = await supabase.from('conversations').select('id').in('id', commonConvIds).eq('is_group', false);
+        if (err3) console.error("Error fetching common convs:", err3);
         if (convs && convs.length > 0) currentConvId = convs[0].id;
       }
 
       if (!currentConvId) {
-        const { data: newConv } = await supabase.from('conversations').insert({ is_group: false }).select().single();
+        const { data: newConv, error: err4 } = await supabase.from('conversations').insert({ is_group: false }).select().single();
+        if (err4) console.error("Error creating new conversation:", err4);
+        
         if (newConv) {
           currentConvId = newConv.id;
-          await supabase.from('conversation_members').insert([
+          const { error: err5 } = await supabase.from('conversation_members').insert([
             { conversation_id: currentConvId, user_id: myId },
             { conversation_id: currentConvId, user_id: activeContact.id }
           ]);
+          if (err5) console.error("Error adding members to conversation:", err5);
         }
       }
 
@@ -238,6 +244,14 @@ export default function ChatArea({ activeContact, myId, onStartCall }: ChatAreaP
     }
   };
 
+  const handleLeaveGroup = async () => {
+    if (!conversationId) return;
+    if (confirm("Are you sure you want to leave this group?")) {
+      await supabase.from('conversation_members').delete().eq('conversation_id', conversationId).eq('user_id', myId);
+      window.location.reload(); // Simple refresh to clear state and update contacts
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -280,6 +294,11 @@ export default function ChatArea({ activeContact, myId, onStartCall }: ChatAreaP
           <button className="icon-btn" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }} onClick={() => activeContact.isGroup ? setShowGroupAdmin(true) : alert('Chat Settings coming soon!')} title={activeContact.isGroup ? "Group Settings" : "Chat Settings"}>
             <Settings size={18} />
           </button>
+          {activeContact.isGroup && (
+            <button className="icon-btn" style={{ backgroundColor: 'var(--danger)', color: 'white' }} onClick={handleLeaveGroup} title="Leave Group">
+              <LogOut size={18} />
+            </button>
+          )}
         </div>
       </div>
 

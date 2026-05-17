@@ -68,19 +68,50 @@ export default function App() {
   };
 
   const fetchContacts = async (myId: string) => {
-    // 1. Fetch available users
-    const { data: users } = await supabase.from('profiles').select('*').neq('id', myId);
+    // 1. Fetch friends instead of all users
+    const { data: myFriendsData } = await supabase
+      .from('relationships')
+      .select('friend_id, user_id, status')
+      .or(`user_id.eq.${myId},friend_id.eq.${myId}`)
+      .eq('status', 'accepted');
+      
+    let friendIds = new Set<string>();
+    if (myFriendsData) {
+      myFriendsData.forEach(rel => {
+        if (rel.user_id !== myId) friendIds.add(rel.user_id);
+        if (rel.friend_id !== myId) friendIds.add(rel.friend_id);
+      });
+    }
+
+    // Always include AndrewRusher and Skycord automatically (case-insensitive)
+    const { data: globalUsers } = await supabase
+      .from('profiles')
+      .select('id')
+      .or('username.ilike.AndrewRusher,username.ilike.Skycord');
+      
+    if (globalUsers) {
+      globalUsers.forEach(u => friendIds.add(u.id));
+    }
+    
+    // Remove self from friends list if somehow added
+    friendIds.delete(myId);
+    
+    const finalFriendIds = Array.from(friendIds);
     let mappedUsers: any[] = [];
-    if (users) {
-      mappedUsers = users.map((p: any) => ({
-        id: p.id,
-        name: p.display_name,
-        status: p.status || 'offline',
-        isGroup: false,
-        lastMsg: p.role === 'admin' ? 'Skycord Administrator' : 'Available to chat!',
-        avatarUrl: p.avatar_url,
-        role: p.role || 'user'
-      }));
+    
+    if (finalFriendIds.length > 0) {
+      const { data: users } = await supabase.from('profiles').select('*').in('id', finalFriendIds);
+      if (users) {
+        mappedUsers = users.map((p: any) => ({
+          id: p.id,
+          name: p.display_name,
+          status: p.status || 'offline',
+          isGroup: false,
+          lastMsg: p.role === 'admin' ? 'Skycord Administrator' : 'Available to chat!',
+          avatarUrl: p.avatar_url,
+          role: p.role || 'user'
+        }));
+      }
     }
 
     // 2. Fetch my groups

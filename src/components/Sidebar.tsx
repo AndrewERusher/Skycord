@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, Plus, Home, Grip, BookUser, Settings, MoreHorizontal, Clock, MessageCircle, Users } from 'lucide-react';
+import { Search, Plus, Home, Grip, BookUser, Settings, MoreHorizontal, Clock, MessageCircle, Users, ChevronDown, ChevronRight } from 'lucide-react';
 import FriendRequestModal from './FriendRequestModal';
 import { supabase } from '../lib/supabaseClient';
 
@@ -13,6 +13,7 @@ interface Contact {
   role?: string;
   chatType?: 'subgroup' | 'main' | 'group';
   parentName?: string;
+  parentGroupId?: string | number;
 }
 
 interface SidebarProps {
@@ -41,6 +42,13 @@ export default function Sidebar({ onProfileClick, onSettingsClick, currentUser, 
   const [showPlusMenu, setShowPlusMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [targetUser, setTargetUser] = useState('');
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  
+  const toggleGroup = (groupId: string | number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCollapsedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }));
+  };
+
   // @ts-ignore: setUnreadCounts will be used when real-time unread tracking is wired up
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const totalUnread = Object.values(unreadCounts).reduce((sum, n) => sum + n, 0);
@@ -190,34 +198,72 @@ export default function Sidebar({ onProfileClick, onSettingsClick, currentUser, 
       
       <div className="contact-list">
         {filteredContacts.length > 0 ? (
-          filteredContacts.map(contact => (
-            <div 
-              key={contact.id} 
-              className={`contact-item ${contact.id === activeContactId ? 'active' : ''}`}
-              onClick={() => onSelectContact(contact.id)}
-            >
-              <div className="avatar-container">
-                {contact.avatarUrl ? (
-                  <img src={contact.avatarUrl} alt="avatar" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                ) : contact.isGroup ? (
-                  <Users size={20} color="var(--text-secondary)" />
-                ) : (
-                  getInitials(contact.name)
-                )}
-                {!contact.isGroup && (
-                  <div className={`status-indicator status-${contact.status}`}></div>
-                )}
-              </div>
-              <div className="contact-info">
-                <div className="contact-name" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  {contact.name}
-                  {contact.role === 'admin' && <span title="Skycord Administrator" style={{ color: 'var(--accent-primary)', fontSize: '0.8rem' }}>👑</span>}
+          (() => {
+            const isSearching = searchQuery.trim().length > 0;
+            const topLevel = filteredContacts.filter(c => c.chatType !== 'subgroup' || isSearching);
+            const subgroups = filteredContacts.filter(c => c.chatType === 'subgroup');
+
+            return topLevel.map(contact => {
+              const contactSubgroups = subgroups.filter(sub => sub.parentGroupId === contact.id);
+
+              return (
+                <div key={contact.id}>
+                  <div 
+                    className={`contact-item ${contact.id === activeContactId ? 'active' : ''}`}
+                    onClick={() => onSelectContact(contact.id)}
+                  >
+                    <div className="avatar-container">
+                      {contact.avatarUrl ? (
+                        <img src={contact.avatarUrl} alt="avatar" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                      ) : contact.isGroup ? (
+                        <Users size={20} color="var(--text-secondary)" />
+                      ) : (
+                        getInitials(contact.name)
+                      )}
+                      {!contact.isGroup && (
+                        <div className={`status-indicator status-${contact.status}`}></div>
+                      )}
+                    </div>
+                    <div className="contact-info">
+                      <div className="contact-name" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        {contact.name}
+                        {contact.role === 'admin' && <span title="Skycord Administrator" style={{ color: 'var(--accent-primary)', fontSize: '0.8rem' }}>👑</span>}
+                      </div>
+                      <div className="contact-status-text">{contact.lastMsg}</div>
+                    </div>
+                    {unreadCounts[String(contact.id)] > 0 && <div className="badge-orange" style={{ marginLeft: 'auto', marginRight: '8px' }}>{unreadCounts[String(contact.id)]}</div>}
+                    {!isSearching && contactSubgroups.length > 0 && (
+                      <div 
+                        onClick={(e) => toggleGroup(contact.id, e)} 
+                        style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', padding: '4px', cursor: 'pointer', color: 'var(--text-secondary)' }}
+                        title={collapsedGroups[String(contact.id)] ? "Expand Subgroups" : "Collapse Subgroups"}
+                      >
+                        {collapsedGroups[String(contact.id)] ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Render Nested Subgroups */}
+                  {!isSearching && contactSubgroups.length > 0 && !collapsedGroups[String(contact.id)] && (
+                    <div style={{ marginLeft: '32px', borderLeft: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column' }}>
+                      {contactSubgroups.map(sub => (
+                        <div 
+                          key={sub.id} 
+                          className={`contact-item ${sub.id === activeContactId ? 'active' : ''}`}
+                          onClick={() => onSelectContact(sub.id)}
+                          style={{ padding: '6px 12px', minHeight: '36px', borderRadius: '0 var(--radius-md) var(--radius-md) 0' }}
+                        >
+                          <div className="contact-info">
+                            <div className="contact-name" style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}># {sub.name}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className="contact-status-text">{contact.lastMsg}</div>
-              </div>
-              {unreadCounts[String(contact.id)] > 0 && <div className="badge-orange" style={{ marginLeft: 'auto' }}>{unreadCounts[String(contact.id)]}</div>}
-            </div>
-          ))
+              );
+            });
+          })()
         ) : (
           <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
             No contacts found

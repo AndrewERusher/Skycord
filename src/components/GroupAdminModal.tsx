@@ -95,7 +95,7 @@ export default function GroupAdminModal({ groupId, myId, onClose }: GroupAdminMo
   const handleInvite = async () => {
     if (!inviteUsername.trim()) return;
     setInviteStatus('Searching...');
-    const { data: profile } = await supabase.from('profiles').select('id, display_name').eq('username', inviteUsername.trim()).single();
+    const { data: profile } = await supabase.from('profiles').select('id, display_name').ilike('username', inviteUsername.trim()).single();
     if (!profile) { setInviteStatus('User not found.'); return; }
     const { error } = await supabase.from('conversation_members').insert({ conversation_id: groupId, user_id: profile.id, group_role: 'member' });
     if (error) { setInviteStatus('Already a member or error: ' + error.message); }
@@ -128,8 +128,6 @@ export default function GroupAdminModal({ groupId, myId, onClose }: GroupAdminMo
                 {subGroups.length > 0 ? (
                   <div style={{ display: 'grid', gap: '8px', marginBottom: '16px' }}>
                     {subGroups.map(sub => {
-                      const alreadyIn = members.find(m => m.user_id === myId);
-                      const inSubgroup = alreadyIn; // already fetched from parent, check sub separately if needed
                       return (
                         <div key={sub.id} style={{ padding: '12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                           <span style={{ fontWeight: 600 }}># {sub.name}</span>
