@@ -351,7 +351,7 @@ export default function App() {
 
         // Send a ring signal to the callee
         if (!activeContact.isGroup) {
-          const signalChannel = supabase.channel(`temp_signal_${Date.now()}`);
+          const signalChannel = supabase.channel(`user_signals:${activeContact.id}`);
           signalChannel.subscribe((status) => {
             if (status === 'SUBSCRIBED') {
               signalChannel.send({
@@ -375,7 +375,7 @@ export default function App() {
       {currentView === 'call' && <CallView contact={activeContact} type={callType} myId={currentUser.id} callRole={callRole} onEndCall={() => {
         // Send a call ended signal if we hang up
         if (activeContact && !activeContact.isGroup) {
-          const signalChannel = supabase.channel(`temp_signal_end_${Date.now()}`);
+          const signalChannel = supabase.channel(`user_signals:${activeContact.id}`);
           signalChannel.subscribe((status) => {
             if (status === 'SUBSCRIBED') {
               signalChannel.send({

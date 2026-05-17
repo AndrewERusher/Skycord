@@ -23,7 +23,12 @@ export default function CallView({ contact, type, myId, onEndCall, callRole }: C
   const localStreamRef = useRef<MediaStream | null>(null);
   const channelRef = useRef<any>(null);
 
+  const callStarted = useRef(false);
+
   useEffect(() => {
+    if (callStarted.current) return;
+    callStarted.current = true;
+    
     startCall();
     const timer = setInterval(() => setDuration(d => d + 1), 1000);
     return () => {
@@ -75,7 +80,12 @@ export default function CallView({ contact, type, myId, onEndCall, callRole }: C
 
       channel.on('broadcast', { event: 'signal' }, async ({ payload }: any) => {
         if (payload.from === myId) return; // ignore our own signals
-        if (payload.type === 'offer') {
+        if (payload.type === 'ready' && callRole === 'caller') {
+          // Callee is ready, send the offer!
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          channel.send({ type: 'broadcast', event: 'signal', payload: { type: 'offer', sdp: offer, from: myId } });
+        } else if (payload.type === 'offer') {
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
@@ -88,20 +98,21 @@ export default function CallView({ contact, type, myId, onEndCall, callRole }: C
         }
       });
 
-      await channel.subscribe();
+      // We must subscribe before we send any signals
+      channel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          if (callRole === 'callee') {
+            // Tell the caller we are ready to receive the offer
+            channel.send({ type: 'broadcast', event: 'signal', payload: { type: 'ready', from: myId } });
+          }
+        }
+      });
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           channel.send({ type: 'broadcast', event: 'signal', payload: { type: 'ice', candidate: event.candidate, from: myId } });
         }
       };
-
-      if (callRole === 'caller') {
-        // Caller creates the offer
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        channel.send({ type: 'broadcast', event: 'signal', payload: { type: 'offer', sdp: offer, from: myId } });
-      }
 
     } catch (err: any) {
       setError(err.message || 'Could not access microphone/camera');
