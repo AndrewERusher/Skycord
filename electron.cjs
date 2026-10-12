@@ -1,8 +1,20 @@
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, session } = require('electron');
 const path = require('path');
 const { autoUpdater } = require('electron-updater');
 
 const isDev = !app.isPackaged;
+
+function setupPermissions() {
+  // Grant camera/microphone access to the renderer. Without this handler,
+  // getUserMedia() is denied in the packaged app and calls fail immediately.
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (permission === 'media') {
+      callback(true);
+    } else {
+      callback(false);
+    }
+  });
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -46,7 +58,10 @@ autoUpdater.on('update-downloaded', () => {
   });
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  setupPermissions();
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
