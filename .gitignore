@@ -25,3 +25,6 @@ dist-ssr
 
 # Build outputs
 release/
+
+# Environment variables (TURN credentials live in .env)
+.env
