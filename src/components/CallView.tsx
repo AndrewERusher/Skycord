@@ -10,6 +10,9 @@ interface CallViewProps {
   callRole: 'caller' | 'callee';
 }
 
+// How long to wait for the call to connect before giving up.
+const CALL_SETUP_TIMEOUT_MS = 45000;
+
 export default function CallView({ contact, type, myId, onEndCall, callRole }: CallViewProps) {
   const [duration, setDuration] = useState(0);
   const [micMuted, setMicMuted] = useState(false);
@@ -22,13 +25,16 @@ export default function CallView({ contact, type, myId, onEndCall, callRole }: C
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const channelRef = useRef<any>(null);
+  // ICE candidates that arrive before the remote description is set.
+  const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const setupTimeoutRef = useRef<number | null>(null);
 
   const callStarted = useRef(false);
 
   useEffect(() => {
     if (callStarted.current) return;
     callStarted.current = true;
-    
+
     startCall();
     const timer = setInterval(() => setDuration(d => d + 1), 1000);
     return () => {
@@ -37,16 +43,78 @@ export default function CallView({ contact, type, myId, onEndCall, callRole }: C
     };
   }, []);
 
+  const clearSetupTimeout = () => {
+    if (setupTimeoutRef.current !== null) {
+      clearTimeout(setupTimeoutRef.current);
+      setupTimeoutRef.current = null;
+    }
+  };
+
+  const markConnected = () => {
+    clearSetupTimeout();
+    setCallStatus('connected');
+  };
+
+  const markFailed = (message: string) => {
+    clearSetupTimeout();
+    setError(message);
+    setCallStatus('failed');
+  };
+
   const cleanup = () => {
+    clearSetupTimeout();
+    pendingCandidatesRef.current = [];
     localStreamRef.current?.getTracks().forEach(t => t.stop());
     peerConnectionRef.current?.close();
     if (channelRef.current) supabase.removeChannel(channelRef.current);
   };
 
-  const getIceServers = () => ([
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
-  ]);
+  const getIceServers = (): RTCIceServer[] => {
+    const servers: RTCIceServer[] = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' }
+    ];
+    // Optional TURN server for NAT traversal. Configure via .env
+    // (see .env.example). Without TURN, calls fail on strict NATs,
+    // which is the most common reason calls never connect.
+    const turnUrl = import.meta.env.VITE_TURN_URL as string | undefined;
+    const turnUsername = import.meta.env.VITE_TURN_USERNAME as string | undefined;
+    const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL as string | undefined;
+    if (turnUrl && turnUsername && turnCredential) {
+      servers.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
+    } else {
+      console.warn('[Skycord] No TURN server configured (VITE_TURN_URL not set). Calls may fail on strict NATs.');
+    }
+    return servers;
+  };
+
+  // Add an ICE candidate, queueing it if the remote description isn't set yet.
+  const handleRemoteCandidate = async (candidate: RTCIceCandidateInit) => {
+    const pc = peerConnectionRef.current;
+    if (!pc) return;
+    if (pc.remoteDescription) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.warn('[Skycord] Failed to add ICE candidate', e);
+      }
+    } else {
+      pendingCandidatesRef.current.push(candidate);
+    }
+  };
+
+  const flushPendingCandidates = async () => {
+    const pc = peerConnectionRef.current;
+    if (!pc || !pc.remoteDescription) return;
+    const queued = pendingCandidatesRef.current.splice(0);
+    for (const candidate of queued) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.warn('[Skycord] Failed to add queued ICE candidate', e);
+      }
+    }
+  };
 
   const startCall = async () => {
     try {
@@ -69,9 +137,32 @@ export default function CallView({ contact, type, myId, onEndCall, callRole }: C
       pc.ontrack = (event) => {
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = event.streams[0];
-          setCallStatus('connected');
+          markConnected();
         }
       };
+
+      // Surface real connection failures instead of hanging on "Calling..."
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState;
+        if (state === 'connected') {
+          markConnected();
+        } else if (state === 'failed') {
+          markFailed('Connection failed. Check your network connection or TURN server configuration.');
+        } else if (state === 'closed') {
+          markFailed('Call ended unexpectedly.');
+        }
+      };
+
+      // Give up if the call never connects (e.g. the other side never answers).
+      setupTimeoutRef.current = window.setTimeout(() => {
+        setCallStatus(prev => {
+          if (prev === 'calling') {
+            setError('Call timed out. The other person may be offline or unreachable.');
+            return 'failed';
+          }
+          return prev;
+        });
+      }, CALL_SETUP_TIMEOUT_MS);
 
       // Use Supabase realtime as signaling channel
       const channelName = [myId, contact.id].sort().join('-');
@@ -87,14 +178,16 @@ export default function CallView({ contact, type, myId, onEndCall, callRole }: C
           channel.send({ type: 'broadcast', event: 'signal', payload: { type: 'offer', sdp: offer, from: myId } });
         } else if (payload.type === 'offer') {
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          await flushPendingCandidates();
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           channel.send({ type: 'broadcast', event: 'signal', payload: { type: 'answer', sdp: answer, from: myId } });
         } else if (payload.type === 'answer') {
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-          setCallStatus('connected');
+          await flushPendingCandidates();
+          markConnected();
         } else if (payload.type === 'ice') {
-          if (payload.candidate) await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+          if (payload.candidate) await handleRemoteCandidate(payload.candidate);
         }
       });
 
@@ -115,8 +208,7 @@ export default function CallView({ contact, type, myId, onEndCall, callRole }: C
       };
 
     } catch (err: any) {
-      setError(err.message || 'Could not access microphone/camera');
-      setCallStatus('failed');
+      markFailed(err.message || 'Could not access microphone/camera');
     }
   };
 
