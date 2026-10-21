@@ -34,7 +34,6 @@ export default function CallView({ contact, type, myId, onEndCall, callRole }: C
   useEffect(() => {
     if (callStarted.current) return;
     callStarted.current = true;
-
     startCall();
     const timer = setInterval(() => setDuration(d => d + 1), 1000);
     return () => {
@@ -62,6 +61,7 @@ export default function CallView({ contact, type, myId, onEndCall, callRole }: C
   };
 
   const cleanup = () => {
+    callStarted.current = false;
     clearSetupTimeout();
     pendingCandidatesRef.current = [];
     localStreamRef.current?.getTracks().forEach(t => t.stop());
